@@ -27,9 +27,6 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = optimize,
     });
     kernel.code_model = .kernel;
-    kernel.addAnonymousModule("zigimg", .{
-        .source_file = .{ .path = "lib/zigimg/zigimg.zig" },
-    });
     kernel.addAnonymousModule("limine", .{
         .source_file = .{ .path = "limine-zig/limine.zig" },
     });
