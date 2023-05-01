@@ -138,9 +138,9 @@ fn paging2(address: VirtAddr) ?*anyopaque {
     try debug_print("Address: {}", .{addr});
 
     var table4 = lpm4.*[address.level4];
-    var table3 = table4.get_pointer().*[address.level3];
-    var table2 = table3.get_pointer().*[address.level2];
-    var table1 = table2.get_pointer().*[address.level1];
+    var table3 = table4.get_next_table().*[address.level3];
+    var table2 = table3.get_next_table().*[address.level2];
+    var table1 = table2.get_next_table().*[address.level1];
 
     //const table3 = table4.read_next_table(address.level3);
     //const table2 = table3.read_next_table(address.level2);
