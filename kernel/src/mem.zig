@@ -13,6 +13,7 @@ var first_entry: PageAllocatorEntry = .{};
 var next_page: ?*PageAllocatorEntry = null;
 
 pub const page_size = 4096;
+pub var available_pages = 0;
 
 pub fn init(entries: []*limine.MemoryMapEntry) void {
     // var last_page_entry = &first_entry;
@@ -24,9 +25,7 @@ pub fn init(entries: []*limine.MemoryMapEntry) void {
                     var page = @intToPtr(*PageAllocatorEntry, entry.base + i * page_size);
                     page.next = next_page;
                     next_page = page;
-
-                    // last_page_entry.next = page;
-                    // last_page_entry = page;
+                    available_pages += 1;
                 }
             },
             else => {},
@@ -40,8 +39,9 @@ pub fn init(entries: []*limine.MemoryMapEntry) void {
 pub fn allocate_new() !*anyopaque {
     if (next_page) |page| {
         next_page = page.next;
-        //try debug_print("Next: {?*}", .{next_page.?.next});
         page.next = null;
+
+        available_pages -= 1;
 
         return @ptrCast(*anyopaque, page);
     }
@@ -53,6 +53,8 @@ pub fn free(page: *anyopaque) void {
     const new = @ptrCast(*PageAllocatorEntry, @alignCast(8, page));
     new.next = next_page;
     next_page = new;
+
+    available_pages += 1;
 }
 
 pub fn debug_traverse() void {
