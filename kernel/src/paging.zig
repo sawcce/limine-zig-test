@@ -1,4 +1,4 @@
-const Table = packed struct(u64) {
+const TableEntry = packed struct(u64) {
     present: bool,
     writable: bool,
     user_accesible: bool,
@@ -13,17 +13,17 @@ const Table = packed struct(u64) {
     available2: u11,
     exec_forbidden: bool,
 
-    pub fn get_next_table(self: *@This()) *[512]Table {
+    pub fn getNextTable(self: *@This()) *[512]TableEntry {
         const offset = @import("main.zig").offset;
 
-        return @intToPtr(*[512]Table, @intCast(u64, self.phys_addr) * 4096 + offset);
+        return @intToPtr(*[512]TableEntry, @intCast(u64, self.phys_addr) * 4096 + offset);
     }
 };
 
-pub fn getPML4Table() *[512]Table {
+pub fn getPML4Table() *[512]TableEntry {
     var cr3 = asm volatile ("mov %%cr3, %[ret]"
         : [ret] "=r" (-> u64),
     );
 
-    return @intToPtr(*[512]Table, cr3 & 0x000f_ffff_ffff_f000);
+    return @intToPtr(*[512]TableEntry, cr3 & 0x000f_ffff_ffff_f000);
 }
