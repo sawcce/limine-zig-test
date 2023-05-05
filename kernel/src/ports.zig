@@ -59,6 +59,17 @@ pub fn Port(comptime T: type) type {
     };
 }
 
+const LineStatus = packed struct(u8) {
+    input_full: bool = false,
+    _: u4 = 0,
+    output_empty: bool = false,
+    __: u2 = 0,
+
+    const Empty = @This(){
+        .output_empty = true,
+    };
+};
+
 pub const SerialPort = struct {
     data: Port(u8),
     int_en: Port(u8),
@@ -105,7 +116,8 @@ pub const SerialPort = struct {
     }
 
     pub fn send(self: SerialPort, data: u8) void {
-        // while (self.line_sts.read() & OUTPUT_EMPTY == OUTPUT_EMPTY) {}
+        while (@ptrCast(*const LineStatus, &self.line_sts.read()).output_empty != true) {}
+
         self.data.write(data);
     }
 
