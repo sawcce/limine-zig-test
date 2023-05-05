@@ -13,7 +13,7 @@ var first_entry: PageAllocatorEntry = .{};
 var next_page: ?*PageAllocatorEntry = null;
 
 pub const page_size = 4096;
-pub var available_pages = 0;
+pub var available_pages: usize = 0;
 
 pub fn init(entries: []*limine.MemoryMapEntry) void {
     // var last_page_entry = &first_entry;
