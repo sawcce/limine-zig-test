@@ -19,11 +19,12 @@ run-uefi: ovmf $(IMAGE_NAME).iso
 
 .PHONY: run-hdd
 run-hdd: $(IMAGE_NAME).hdd
-	qemu-system-x86_64 -M q35 -m 2G -hda $(IMAGE_NAME).hdd
+	qemu-system-x86_64 -M q35 -m 2G -hda $(IMAGE_NAME).hdd -boot d -device isa-debug-exit,iobase=0xf4,iosize=0x04 -serial stdio $(QARGS)
 
 .PHONY: run-hdd-uefi
 run-hdd-uefi: ovmf $(IMAGE_NAME).hdd
-	qemu-system-x86_64 -M q35 -m 2G -bios ovmf/OVMF.fd -hda $(IMAGE_NAME).hdd
+	qemu-system-x86_64 -M q35 -m 2G -bios ovmf/OVMF.fd -hda $(IMAGE_NAME).hdd -boot d -device isa-debug-exit,iobase=0xf4,iosize=0x04 -serial stdio $(QARGS)
+
 
 ovmf:
 	mkdir -p ovmf
