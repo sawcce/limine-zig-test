@@ -31,7 +31,7 @@ inline fn done() noreturn {
 }
 
 const serial_port = SerialPort.new(0x3F8);
-var offset: u64 = undefined;
+pub var offset: u64 = undefined;
 
 pub fn debug_print(comptime fmt: []const u8, args: anytype) !void {
     _ = try serial_port.write_message("[KERNEL] ");
@@ -62,6 +62,10 @@ const VirtAddr = packed struct(u64) {
                 @panic("Tried to create invalid virtual address!");
             },
         };
+    }
+
+    fn fromLevels(level1: u64, level2: u64, level3: u64, level4: u64) VirtAddr {
+        return VirtAddr.new((level1 << 12) + (level2 << 21) + (level3 << 30) + (level4 << 39));
     }
 };
 
@@ -97,63 +101,80 @@ const ExperimentalAllocator = struct {
     }
 };
 
-const Table = packed struct(u64) {
-    present: bool,
-    writable: bool,
-    user_accesible: bool,
-    wtc: bool,
-    cache_disabled: bool,
-    accessed: bool,
-    dirty: bool,
-    _: bool,
-    global: bool,
-    available: u3,
-    phys_addr: u40,
-    available2: u11,
-    exec_forbidden: bool,
-
-    fn next_physical_address(self: *align(1) @This(), index: u9) u64 {
-        return @intCast(u64, self.phys_addr) * 4096 + offset + @intCast(u64, index) * 8;
-    }
-
-    fn read_next_table(self: *align(1) @This(), index: u9) *align(1) Table {
-        // try debug_print("Getting: {}, for {}", .{ index, self });
-        return @intToPtr(*align(1) Table, @intCast(u64, self.phys_addr) * 4096 + offset + @intCast(u64, index) * 8);
-    }
-
-    fn get_next_table(self: *@This()) *[512]Table {
-        return @intToPtr(*[512]Table, @intCast(u64, self.phys_addr) * 4096 + offset);
-    }
-};
+const paging = @import("paging.zig");
 
 fn paging2(address: VirtAddr) ?*anyopaque {
-    var cr3 = asm volatile ("mov %%cr3, %[ret]"
-        : [ret] "=r" (-> u64),
-    );
+    const pml4 = paging.getPML4Table();
 
-    var lpm4 = @intToPtr(*[512]Table, cr3 & 0x000f_ffff_ffff_f000);
+    //var addr = address;
+    //try debug_print("Address: 0b{b} 0x{x}", .{ @ptrCast(*u64, &addr).*, @ptrCast(*u64, &addr).* });
+    //try debug_print("Address: {}", .{addr});
 
-    var addr = address;
-    try debug_print("Address: 0b{b} 0x{x}", .{ @ptrCast(*u64, &addr).*, @ptrCast(*u64, &addr).* });
-    try debug_print("Address: {}", .{addr});
+    var pml4e = pml4.*[address.level4];
+    var pdpte = pml4e.getNextTable().*[address.level3];
 
-    var table4 = lpm4.*[address.level4];
-    var table3 = table4.get_next_table().*[address.level3];
-    var table2 = table3.get_next_table().*[address.level2];
-    var table1 = table2.get_next_table().*[address.level1];
+    if (pdpte.ps == true) {
+        try debug_print("1GIB Page", .{});
+        @panic("TODO");
+        //return @intToPtr(?*anyopaque, @intCast(u64, pdpte.phys_addr) * 4096 + @intCast(u64, address.level1) * 4096);
+    }
 
-    //const table3 = table4.read_next_table(address.level3);
-    //const table2 = table3.read_next_table(address.level2);
-    //const table1 = table2.read_next_table(address.level1);
-    const entry = @intToPtr(*u64, table2.next_physical_address(address.level1));
-    _ = entry;
+    var pde = pdpte.getNextTable().*[address.level2];
 
-    try debug_print("4: {}", .{table4});
-    try debug_print("3: {}", .{table3});
-    try debug_print("2: {}", .{table2});
-    try debug_print("1: {any}", .{table1});
-    try debug_print("Entry: 0x{x}", .{@intCast(u64, table2.phys_addr) * 4096});
-    return @intToPtr(?*anyopaque, @intCast(u64, table1.phys_addr) * 4096 + @intCast(u64, address.page_offset) * 4096);
+    if (pde.ps == true) {
+        return @intToPtr(?*anyopaque, @intCast(u64, pde.phys_addr) * 4096 + @intCast(u64, address.level1) * 4096 + address.page_offset);
+    }
+
+    var pte = pde.getNextTable().*[address.level1];
+
+    //try debug_print("4: {}", .{pml4e});
+    //try debug_print("3: {}", .{pdpte});
+    //try debug_print("2: {}", .{pde});
+    //try debug_print("1: {any}", .{pte});
+    //try debug_print("Entry: 0x{x}", .{@intCast(u64, pde.phys_addr) * 4096});
+    return @intToPtr(?*anyopaque, @intCast(u64, pte.phys_addr) * 4096 + @intCast(u64, address.page_offset) * 4096);
+}
+
+fn alloc(size: usize) !?*anyopaque {
+    const minimum_pages = (size / mem.page_size) + 1;
+    var pml4 = paging.getPML4Table();
+
+    var start_addr: ?VirtAddr = VirtAddr.new(0);
+    var current_size: usize = 0;
+
+    for (pml4, 0..) |*pml4e, level4| {
+        var pdpt = pml4e.getNextTable();
+
+        for (pdpt, 0..) |*pdpte, level3| {
+            var pd = pdpte.getNextTable();
+
+            for (pd, 0..) |*pde, level2| {
+                var pt = pde.getNextTable();
+
+                for (pt, 0..) |*pte, level1| {
+                    if (pte.present) {
+                        current_size = 0;
+                        start_addr = null;
+                        continue;
+                    }
+
+                    if (start_addr == null) {
+                        start_addr = VirtAddr.fromLevels(level1, level2, level3, level4);
+                    }
+
+                    current_size += mem.page_size;
+
+                    if (current_size >= size) {
+                        try debug_print("Done: {} {} {} {}", .{ level4, level3, level2, level1 });
+                        return @ptrCast(*anyopaque, &start_addr);
+                    }
+                }
+            }
+        }
+    }
+
+    _ = minimum_pages;
+    return null;
 }
 
 // The following will be our kernel's entry point.
@@ -188,6 +209,20 @@ export fn _start() callconv(.C) void {
 
     asm volatile ("int $3");
 
+    const uefi = std.os.uefi;
+    _ = uefi;
+
+    std.os.uefi.system_table = @ptrCast(*std.os.uefi.tables.SystemTable, @alignCast(8, sys_table_request.response.?.address));
+    const table = std.os.uefi.system_table;
+    try debug_print("Table {?}", .{table.boot_services});
+    var buffer: [5]std.os.uefi.Handle = undefined;
+    // const status = table.boot_services.?.locateHandle(uefi.tables.LocateSearchType.AllHandles, &uefi.protocols.BlockIoProtocol.guid, null, @constCast(&buffer.len), &buffer);
+    // try debug_print("Status: {}", .{status});
+
+    for (buffer) |handle| {
+        try debug_print("Found handle: {}", .{handle});
+    }
+
     // intentional(0);
 
     if (info_request.response) |info_response| {
@@ -213,10 +248,6 @@ export fn _start() callconv(.C) void {
         try debug_print("DTB Not found!", .{});
     }
 
-    if (sys_table_request.response) |sys_table_res| {
-        try debug_print("Table: {}", .{sys_table_res});
-    }
-
     if (rsdp_request.response) |rsdp_res| {
         const rsdp = @ptrCast(*align(1) acpi.RSDPDescriptor20, rsdp_res.address);
 
@@ -231,7 +262,55 @@ export fn _start() callconv(.C) void {
             var entry = xsdt.getEntry(i);
 
             switch (entry.signature) {
-                acpi.Signature.MCFG => try debug_print("MCFG!!!", .{}),
+                acpi.Signature.MCFG => {
+                    const mcfg = @ptrCast(*acpi.MCFG, entry);
+
+                    try debug_print("MCFG! {} {}", .{ mcfg, mcfg.header.doChecksum() });
+                    const MCFGEntry = packed struct(u128) {
+                        base_addr: u64,
+                        segment_group: u16,
+                        start_bus: u8,
+                        end_bus: u8,
+                        reserved: u32,
+                    };
+
+                    const base = @ptrToInt(mcfg) + @sizeOf(acpi.MCFG);
+                    var pi = base;
+                    //@compileLog(@sizeOf(acpi.MCFG));
+
+                    while (pi < base + entry.length - @sizeOf(acpi.MCFG)) : (pi += 16) {
+                        const PCI = @intToPtr(*align(1) MCFGEntry, pi);
+                        const Config = @import("pci/config.zig").Config;
+
+                        try debug_print("PCI: 0x{x}@{} ", .{ PCI.base_addr, PCI });
+
+                        for (PCI.start_bus..PCI.end_bus) |id| {
+                            for (0..16) |did| {
+                                for (0..8) |fid| {
+                                    const rc = @intToPtr(*align(1) Config, offset + PCI.base_addr + (id << 20) + (did << 15) + (fid << 12));
+
+                                    switch (rc.classCode) {
+                                        0xc0320 => {},
+                                        0x10601 => {
+                                            const AHCI = @import("pci/ahci.zig");
+
+                                            try debug_print("AHCI Drive: {}", .{rc.bar5});
+                                            for (0..31) |port_index| {
+                                                const port = @intToPtr(*AHCI.PortHeader, offset + rc.bar5 + 256 + 128 * (port_index));
+                                                if (port.sig != AHCI.Signature.SATA) continue;
+                                                const slots = (port.sact | port.ci);
+                                                try debug_print("Port 0: {} {}", .{ slots, port.sig });
+                                            }
+                                        },
+                                        0xffffff => continue,
+                                        else => {},
+                                    }
+                                    try debug_print("Conf {} 0x{x}", .{ rc, rc.vendorID });
+                                }
+                            }
+                        }
+                    }
+                },
                 acpi.Signature.APIC => {
                     try debug_print("APIC Found!", .{});
                     const apic = entry.into(acpi.APIC);
@@ -252,36 +331,14 @@ export fn _start() callconv(.C) void {
 
     // Ensure we got a framebuffer.
     var last_address = @intCast(u64, 0);
+    _ = last_address;
 
     try debug_print("--------------", .{});
     try debug_print("{?}", .{paging2(VirtAddr.new(offset))});
     try debug_print("--------------", .{});
 
-    for (0..1) |i| {
-        const page = mem.allocate_new() catch {
-            try debug_print("Stopped at index: {}", .{i});
-            done();
-        };
-
-        const new_addr = @ptrToInt(page);
-        const diff = @intCast(i64, new_addr) - @intCast(i64, last_address);
-
-        // if (diff / 8 > 4096) {
-        try debug_print("New page ({}) at: {*}; Diff with old: {} bytes; {x}", .{
-            i,
-            page,
-            diff,
-            @ptrCast(*u64, @alignCast(8, page)).*,
-        });
-
-        const virt = VirtAddr.new(new_addr);
-        try debug_print("Virt: {}; Paging: {?}", .{ virt, paging2(virt) });
-
-        // }
-
-        last_address = new_addr;
-        //mem.free(page);
-    }
+    const testAlloc = alloc(10000) catch {};
+    try debug_print("Test alloc: {?}", .{testAlloc});
 
     done();
 

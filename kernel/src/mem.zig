@@ -5,14 +5,16 @@ const EntryType = limine.MemoryMapEntryType;
 
 const debug_print = @import("main.zig").debug_print;
 
+pub const page_size = 4096;
+
 const PageAllocatorEntry = extern struct {
     next: ?*PageAllocatorEntry = null,
+    size: usize = page_size,
 };
 
 var first_entry: PageAllocatorEntry = .{};
 var next_page: ?*PageAllocatorEntry = null;
 
-pub const page_size = 4096;
 pub var available_pages: usize = 0;
 
 pub fn init(entries: []*limine.MemoryMapEntry) void {
@@ -47,6 +49,10 @@ pub fn allocate_new() !*anyopaque {
     }
 
     return error.NoMorePhysicalMemory;
+}
+
+pub fn allocate(size: usize) !*anyopaque {
+    _ = size;
 }
 
 pub fn free(page: *anyopaque) void {

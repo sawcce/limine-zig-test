@@ -51,7 +51,7 @@ pub const ACPISDTHeader = extern struct {
     }
 
     pub fn into(self: *@This(), comptime dest: type) *dest {
-        return @ptrCast(*dest, self);
+        return @ptrCast(*dest, @alignCast(@alignOf(dest), self));
     }
 };
 
@@ -121,3 +121,5 @@ pub const APIC = extern struct {
         }
     }
 };
+
+pub const MCFG = extern struct { header: ACPISDTHeader, _: u64 align(4) };

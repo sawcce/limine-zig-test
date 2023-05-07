@@ -23,7 +23,12 @@ run-hdd: $(IMAGE_NAME).hdd
 
 .PHONY: run-hdd-uefi
 run-hdd-uefi: ovmf $(IMAGE_NAME).hdd
-	qemu-system-x86_64 -M q35 -m 2G -bios ovmf/OVMF.fd -hda $(IMAGE_NAME).hdd -boot d -device isa-debug-exit,iobase=0xf4,iosize=0x04 -serial stdio $(QARGS)
+	qemu-system-x86_64 -M q35 -m 2G -bios ovmf/OVMF.fd \
+	-drive id=disk,file=$(IMAGE_NAME).hdd,if=none \
+	-device ahci,id=ahci \
+	-device ide-hd,drive=disk,bus=ahci.0 \
+	-boot d \
+	-device isa-debug-exit,iobase=0xf4,iosize=0x04 -serial stdio $(QARGS)
 
 
 ovmf:
@@ -63,8 +68,10 @@ $(IMAGE_NAME).hdd: limine kernel
 	mkdir -p img_mount
 	sudo mount `cat loopback_dev`p1 img_mount
 	sudo mkdir -p img_mount/EFI/BOOT
+	sudo mkdir -p img_mount/EXTRAS
 	sudo cp -v kernel/zig-out/bin/kernel limine.cfg limine/limine.sys img_mount/
 	sudo cp -v limine/BOOTX64.EFI img_mount/EFI/BOOT/
+	sudo cp -v data.txt img_mount/EXTRAS/
 	sync
 	sudo umount img_mount
 	sudo losetup -d `cat loopback_dev`
