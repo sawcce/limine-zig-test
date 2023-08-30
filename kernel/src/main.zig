@@ -41,7 +41,6 @@ pub fn debug_print(comptime fmt: []const u8, args: anytype) !void {
 
 fn getBits(number: u64, start: u64, end: u64) u64 {
     const mask = std.math.shl(u64, 1, end - start) - 1;
-    // const mask = (@intCast(u64, 1) << (end - start)) - @intCast(u64, 1);
     return std.math.shr(u64, number, start) & mask;
 }
 
