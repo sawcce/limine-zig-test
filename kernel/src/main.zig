@@ -222,8 +222,6 @@ export fn _start() callconv(.C) void {
         try debug_print("Found handle: {}", .{handle});
     }
 
-    // intentional(0);
-
     if (info_request.response) |info_response| {
         try debug_print("Info request completed!", .{});
         const name: [*:0]u8 = info_response.name;
@@ -237,12 +235,6 @@ export fn _start() callconv(.C) void {
     if (device_tree_request.response) |device_tree_blob_response| {
         const dtb_e = device_tree_blob_response.dtb;
         try debug_print("DTB found: {?}", .{dtb_e});
-
-        // if (dtb_e) |dtb| {
-        //     try debug_print("DTB! {*}", dtb);
-        //                const header: *FDT_HEADER = @ptrCast(*FDT_HEADER, @alignCast(4, dtb));
-        //              try debug_print("DTB header: {}", .{header});
-        // }
     } else {
         try debug_print("DTB Not found!", .{});
     }
