@@ -116,7 +116,7 @@ pub const SerialPort = struct {
     }
 
     pub fn send(self: SerialPort, data: u8) void {
-        while (@ptrCast(*const LineStatus, &self.line_sts.read()).output_empty != true) {}
+        while (@as(*const LineStatus, @ptrCast(&self.line_sts.read())).output_empty != true) {}
 
         self.data.write(data);
     }

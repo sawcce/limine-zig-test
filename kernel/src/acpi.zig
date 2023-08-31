@@ -17,7 +17,7 @@ pub const RSDPDescriptor20 = extern struct {
     reserved: [3]u8,
 
     pub fn doChecksum(self: *align(1) @This()) bool {
-        const bytes = @ptrCast([*]const u8, self);
+        const bytes = @as([*]const u8, @ptrCast(self));
         var sum: u8 = 0;
 
         for (0..self.length) |i| {
@@ -40,7 +40,7 @@ pub const ACPISDTHeader = extern struct {
     creatorRevision: u32,
 
     pub fn doChecksum(self: *const @This()) bool {
-        const bytes = @ptrCast([*]const u8, self);
+        const bytes = @as([*]const u8, @ptrCast(self));
         var sum: u8 = 0;
 
         for (0..self.length) |i| {
@@ -51,7 +51,7 @@ pub const ACPISDTHeader = extern struct {
     }
 
     pub fn into(self: *@This(), comptime dest: type) *dest {
-        return @ptrCast(*dest, @alignCast(@alignOf(dest), self));
+        return @as(*dest, @ptrCast(@alignCast(self)));
     }
 };
 
@@ -63,17 +63,17 @@ pub const XSDT = extern struct {
     }
 
     pub fn getEntry(self: *const @This(), i: usize) *ACPISDTHeader {
-        const addr = @intToPtr(*align(1) u64, @ptrToInt(self) + @sizeOf(ACPISDTHeader) + @sizeOf(u64) * i);
-        return @intToPtr(*ACPISDTHeader, addr.*);
+        const addr = @as(*align(1) u64, @ptrFromInt(@intFromPtr(self) + @sizeOf(ACPISDTHeader) + @sizeOf(u64) * i));
+        return @as(*ACPISDTHeader, @ptrFromInt(addr.*));
     }
 };
 
 pub const Signature = enum(u32) {
-    APIC = @ptrCast(*align(1) const u32, "APIC").*,
-    FACP = @ptrCast(*align(1) const u32, "FACP").*,
-    HPET = @ptrCast(*align(1) const u32, "HPET").*,
-    MCFG = @ptrCast(*align(1) const u32, "MCFG").*,
-    WAET = @ptrCast(*align(1) const u32, "WAET").*,
+    APIC = @as(*align(1) const u32, @ptrCast("APIC")).*,
+    FACP = @as(*align(1) const u32, @ptrCast("FACP")).*,
+    HPET = @as(*align(1) const u32, @ptrCast("HPET")).*,
+    MCFG = @as(*align(1) const u32, @ptrCast("MCFG")).*,
+    WAET = @as(*align(1) const u32, @ptrCast("WAET")).*,
     _,
 
     pub fn format(
@@ -85,7 +85,7 @@ pub const Signature = enum(u32) {
         _ = fmt;
         _ = options;
 
-        try writer.writeAll(@ptrCast(*const [4]u8, &self));
+        try writer.writeAll(@as(*const [4]u8, @ptrCast(&self)));
     }
 };
 
@@ -110,12 +110,12 @@ pub const APIC = extern struct {
 
     pub fn loopEntries(self: *const @This()) void {
         try debug_print("Self: {*}", .{self});
-        var i: usize = @ptrToInt(self) + @sizeOf(APIC);
+        var i: usize = @intFromPtr(self) + @sizeOf(APIC);
         const base = i;
         try debug_print("{}", .{i});
 
         while (i < base + self.header.length - @sizeOf(@This())) {
-            const header = @intToPtr(*RecordHeader, i);
+            const header = @as(*RecordHeader, @ptrFromInt(i));
             try debug_print("{} | {}", .{ header.*, i });
             i += header.length;
         }

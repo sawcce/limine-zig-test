@@ -36,7 +36,7 @@ pub const VirtAddr = packed struct {
         // const as_i64 = @bitCast(i64, no_high_bits);
         // const sign_extend_high_bits = as_i64 >> 16;
         // const value = @bitCast(u64, sign_extend_high_bits);
-        return VirtAddr{ .value = @bitCast(u64, @bitCast(i64, (addr << 16)) >> 16) };
+        return VirtAddr{ .value = @as(u64, @bitCast(@as(i64, @bitCast((addr << 16))) >> 16)) };
     }
 
     /// Creates a new virtual address, without any checks.
@@ -58,12 +58,12 @@ pub const VirtAddr = packed struct {
     /// Panics if the given pointer is not a valid virtual address, this should never happen in reality
     pub fn fromPtr(ptr: anytype) VirtAddr {
         comptime if (@typeInfo(@TypeOf(ptr)) != .Pointer) @compileError("not a pointer");
-        return initPanic(@ptrToInt(ptr));
+        return initPanic(@intFromPtr(ptr));
     }
 
     /// Converts the address to a pointer.
     pub fn toPtr(self: VirtAddr, comptime T: type) T {
-        return @intToPtr(T, self.value);
+        return @as(T, @ptrFromInt(self.value));
     }
 
     /// Aligns the virtual address upwards to the given alignment.
@@ -86,32 +86,32 @@ pub const VirtAddr = packed struct {
 
     /// Returns the 12-bit page offset of this virtual address.
     pub fn pageOffset(self: VirtAddr) PageOffset {
-        return PageOffset.init(@truncate(u12, self.value));
+        return PageOffset.init(@as(u12, @truncate(self.value)));
     }
 
     /// Returns the 9-bit level 1 page table index.
     pub fn p1Index(self: VirtAddr) PageTableIndex {
-        return PageTableIndex.init(@truncate(u9, self.value >> 12));
+        return PageTableIndex.init(@as(u9, @truncate(self.value >> 12)));
     }
 
     /// Returns the 9-bit level 2 page table index.
     pub fn p2Index(self: VirtAddr) PageTableIndex {
-        return PageTableIndex.init(@truncate(u9, self.value >> 21));
+        return PageTableIndex.init(@as(u9, @truncate(self.value >> 21)));
     }
 
     /// Returns the 9-bit level 3 page table index.
     pub fn p3Index(self: VirtAddr) PageTableIndex {
-        return PageTableIndex.init(@truncate(u9, self.value >> 30));
+        return PageTableIndex.init(@as(u9, @truncate(self.value >> 30)));
     }
 
     /// Returns the 9-bit level 4 page table index.
     pub fn p4Index(self: VirtAddr) PageTableIndex {
-        return PageTableIndex.init(@truncate(u9, self.value >> 39));
+        return PageTableIndex.init(@as(u9, @truncate(self.value >> 39)));
     }
 
     /// Returns the 9-bit level page table index.
     pub fn pageTableIndex(self: VirtAddr, level: PageTableLevel) PageTableIndex {
-        return PageTableIndex.init(@truncate(u9, self.value >> 12 >> ((@enumToInt(level) - 1) * 9)));
+        return PageTableIndex.init(@as(u9, @truncate(self.value >> 12 >> ((@intFromEnum(level) - 1) * 9))));
     }
 
     pub fn format(value: VirtAddr, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

@@ -16,7 +16,7 @@ const TableEntry = packed struct(u64) {
     pub fn getNextTable(self: *@This()) *[512]TableEntry {
         const offset = @import("main.zig").offset;
 
-        return @intToPtr(*[512]TableEntry, @intCast(u64, self.phys_addr) * 4096 + offset);
+        return @as(*[512]TableEntry, @ptrFromInt(@as(u64, @intCast(self.phys_addr)) * 4096 + offset));
     }
 };
 
@@ -25,5 +25,5 @@ pub fn getPML4Table() *[512]TableEntry {
         : [ret] "=r" (-> u64),
     );
 
-    return @intToPtr(*[512]TableEntry, cr3 & 0x000f_ffff_ffff_f000);
+    return @as(*[512]TableEntry, @ptrFromInt(cr3 & 0x000f_ffff_ffff_f000));
 }

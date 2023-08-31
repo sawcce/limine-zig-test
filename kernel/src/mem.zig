@@ -24,7 +24,7 @@ pub fn init(entries: []*limine.MemoryMapEntry) void {
         switch (entry.kind) {
             EntryType.usable => {
                 for (0..entry.length / page_size) |i| {
-                    var page = @intToPtr(*PageAllocatorEntry, entry.base + i * page_size);
+                    var page = @as(*PageAllocatorEntry, @ptrFromInt(entry.base + i * page_size));
                     page.next = next_page;
                     next_page = page;
                     available_pages += 1;
@@ -45,7 +45,7 @@ pub fn allocate_new() !*anyopaque {
 
         available_pages -= 1;
 
-        return @ptrCast(*anyopaque, page);
+        return @as(*anyopaque, @ptrCast(page));
     }
 
     return error.NoMorePhysicalMemory;
@@ -56,7 +56,7 @@ pub fn allocate(size: usize) !*anyopaque {
 }
 
 pub fn free(page: *anyopaque) void {
-    const new = @ptrCast(*PageAllocatorEntry, @alignCast(8, page));
+    const new = @as(*align (8) PageAllocatorEntry, @ptrCast(@alignCast(page)));
     new.next = next_page;
     next_page = new;
 

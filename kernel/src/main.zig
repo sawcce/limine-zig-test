@@ -54,8 +54,8 @@ const VirtAddr = packed struct(u64) {
 
     fn new(addr: u64) VirtAddr {
         return switch (getBits(addr, 47, 64)) {
-            0, 0x1ffff => @ptrCast(*VirtAddr, @constCast(&addr)).*,
-            1 => @ptrCast(*VirtAddr, @constCast(&@bitCast(u64, @bitCast(i64, addr << 16) >> 16))).*,
+            0, 0x1ffff => @as(*VirtAddr, @ptrCast(@constCast(&addr))).*,
+            1 => @as(*VirtAddr, @ptrCast(@constCast(&@as(u64, @bitCast(@as(i64, @bitCast(addr << 16)) >> 16))))).*,
             else => {
                 try debug_print("Invalid addr!!!!\n", .{});
                 @panic("Tried to create invalid virtual address!");
@@ -121,7 +121,7 @@ fn paging2(address: VirtAddr) ?*anyopaque {
     var pde = pdpte.getNextTable().*[address.level2];
 
     if (pde.ps == true) {
-        return @intToPtr(?*anyopaque, @intCast(u64, pde.phys_addr) * 4096 + @intCast(u64, address.level1) * 4096 + address.page_offset);
+        return @ptrFromInt(@as(u64, @intCast(pde.phys_addr)) * 4096 + @as(u64, @intCast(address.level1)) * 4096 + address.page_offset);
     }
 
     var pte = pde.getNextTable().*[address.level1];
@@ -131,7 +131,7 @@ fn paging2(address: VirtAddr) ?*anyopaque {
     //try debug_print("2: {}", .{pde});
     //try debug_print("1: {any}", .{pte});
     //try debug_print("Entry: 0x{x}", .{@intCast(u64, pde.phys_addr) * 4096});
-    return @intToPtr(?*anyopaque, @intCast(u64, pte.phys_addr) * 4096 + @intCast(u64, address.page_offset) * 4096);
+    return @ptrFromInt(@as(u64, @intCast(pte.phys_addr)) * 4096 + @as(u64, @intCast(address.page_offset)) * 4096);
 }
 
 fn alloc(size: usize) !?*anyopaque {
@@ -165,7 +165,7 @@ fn alloc(size: usize) !?*anyopaque {
 
                     if (current_size >= size) {
                         try debug_print("Done: {} {} {} {}", .{ level4, level3, level2, level1 });
-                        return @ptrCast(*anyopaque, &start_addr);
+                        return @ptrCast(&start_addr);
                     }
                 }
             }
@@ -211,7 +211,7 @@ export fn _start() callconv(.C) void {
     const uefi = std.os.uefi;
     _ = uefi;
 
-    std.os.uefi.system_table = @ptrCast(*std.os.uefi.tables.SystemTable, @alignCast(8, sys_table_request.response.?.address));
+    std.os.uefi.system_table = @as(*std.os.uefi.tables.SystemTable, @ptrCast(@alignCast(sys_table_request.response.?.address)));
     const table = std.os.uefi.system_table;
     try debug_print("Table {?}", .{table.boot_services});
     var buffer: [5]std.os.uefi.Handle = undefined;
@@ -248,9 +248,9 @@ export fn _start() callconv(.C) void {
     }
 
     if (rsdp_request.response) |rsdp_res| {
-        const rsdp = @ptrCast(*align(1) acpi.RSDPDescriptor20, rsdp_res.address);
+        const rsdp = @as(*align(1) acpi.RSDPDescriptor20, @ptrCast(rsdp_res.address));
 
-        var xsdt = @intToPtr(*acpi.XSDT, rsdp.Xsdt_address);
+        var xsdt = @as(*acpi.XSDT, @ptrFromInt(rsdp.Xsdt_address));
 
         try debug_print("RSDP: {}, {}", .{ rsdp, rsdp.doChecksum() });
         try debug_print("{s}", .{rsdp.first_part.OEMID});
@@ -262,7 +262,7 @@ export fn _start() callconv(.C) void {
 
             switch (entry.signature) {
                 acpi.Signature.MCFG => {
-                    const mcfg = @ptrCast(*acpi.MCFG, entry);
+                    const mcfg = @as(*acpi.MCFG, @ptrCast(entry));
 
                     try debug_print("MCFG! {} {}", .{ mcfg, mcfg.header.doChecksum() });
                     const MCFGEntry = packed struct(u128) {
@@ -273,12 +273,12 @@ export fn _start() callconv(.C) void {
                         reserved: u32,
                     };
 
-                    const base = @ptrToInt(mcfg) + @sizeOf(acpi.MCFG);
+                    const base = @intFromPtr(mcfg) + @sizeOf(acpi.MCFG);
                     var pi = base;
                     //@compileLog(@sizeOf(acpi.MCFG));
 
                     while (pi < base + entry.length - @sizeOf(acpi.MCFG)) : (pi += 16) {
-                        const PCI = @intToPtr(*align(1) MCFGEntry, pi);
+                        const PCI = @as(*align(1) MCFGEntry, @ptrFromInt(pi));
                         const Config = @import("pci/config.zig").Config;
 
                         try debug_print("PCI: 0x{x}@{} ", .{ PCI.base_addr, PCI });
@@ -286,7 +286,7 @@ export fn _start() callconv(.C) void {
                         for (PCI.start_bus..PCI.end_bus) |id| {
                             for (0..16) |did| {
                                 for (0..8) |fid| {
-                                    const rc = @intToPtr(*align(1) Config, offset + PCI.base_addr + (id << 20) + (did << 15) + (fid << 12));
+                                    const rc = @as(*align(1) Config, @ptrFromInt(offset + PCI.base_addr + (id << 20) + (did << 15) + (fid << 12)));
 
                                     switch (rc.classCode) {
                                         0xc0320 => {},
@@ -295,7 +295,7 @@ export fn _start() callconv(.C) void {
 
                                             try debug_print("AHCI Drive: {}", .{rc.bar5});
                                             for (0..31) |port_index| {
-                                                const port = @intToPtr(*AHCI.PortHeader, offset + rc.bar5 + 256 + 128 * (port_index));
+                                                const port = @as(*AHCI.PortHeader, @ptrFromInt(offset + rc.bar5 + 256 + 128 * (port_index)));
                                                 if (port.sig != AHCI.Signature.SATA) continue;
                                                 const slots = (port.sact | port.ci);
                                                 try debug_print("Port 0: {} {}", .{ slots, port.sig });
@@ -329,7 +329,7 @@ export fn _start() callconv(.C) void {
     try debug_print("New date: {}", .{date});
 
     // Ensure we got a framebuffer.
-    var last_address = @intCast(u64, 0);
+    var last_address = @as(u64, @intCast(0));
     _ = last_address;
 
     try debug_print("--------------", .{});
@@ -362,8 +362,8 @@ fn display(framebuffer_request: limine.FramebufferResponse) void {
             for (0..100) |x| {
                 for (0..100) |y| {
                     const pixel_offset = framebuffer.pitch * x + y * 4;
-                    const color: u32 = 0x01 * @intCast(u32, x) + 0x0001 * @intCast(u32, y) + 0x00001 * 255 + 0x000000FF;
-                    @ptrCast(*u32, @alignCast(4, framebuffer.address + pixel_offset)).* = color;
+                    const color: u32 = 0x01 * @as(u32, @intCast(x)) + 0x0001 * @as(u32, @intCast(y)) + 0x00001 * 255 + 0x000000FF;
+                    @as(*u32, @ptrCast(@alignCast(framebuffer.address + pixel_offset))).* = color;
                 }
                 // Write 0xFFFFFFFF to the provided pixel offset to fill it white.
             }

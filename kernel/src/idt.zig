@@ -38,7 +38,7 @@ export fn catcher() callconv(.Naked) void {
         \\iretq
     );
 
-    unreachable;
+    // unreachable;
 }
 
 const Frame = extern struct {
@@ -67,7 +67,7 @@ export fn handler_fn(frame: *Frame) void {
 
 pub fn load() void {
     const idtr = IDTR{
-        .base = @ptrToInt(&idt),
+        .base = @intFromPtr(&idt),
         .limit = @sizeOf(@TypeOf(idt)) - 1,
     };
 
@@ -78,7 +78,7 @@ pub fn load() void {
 }
 
 pub fn add_interrupt(idx: u8) void {
-    const pointer = @ptrToInt(trampolines[idx]);
+    const pointer = @intFromPtr(trampolines[idx]);
     // var pointer = @intCast(usize, 4567);
 
     try debug_print("Interrupt: {}", .{idx});
@@ -92,9 +92,9 @@ pub fn add_interrupt(idx: u8) void {
     entry.selector = cs;
     entry.options.gate_type = 0xE;
 
-    entry.offset_low = @truncate(u16, pointer);
-    entry.offset_mid = @truncate(u16, pointer >> 16);
-    entry.offset_high = @truncate(u32, pointer >> 32);
+    entry.offset_low = @as(u16, @truncate(pointer));
+    entry.offset_mid = @as(u16, @truncate(pointer >> 16));
+    entry.offset_high = @as(u32, @truncate(pointer >> 32));
 
     entry.options.present = true;
 
