@@ -23,6 +23,7 @@ pub export var device_tree_request: limine.DeviceTreeBlobRequest = .{};
 pub export var sys_table_request: limine.EfiSystemTableRequest = .{};
 pub export var rsdp_request: limine.RsdpRequest = .{};
 pub export var hhdm_req: limine.HhdmRequest = .{};
+pub export var framebuffer_req: limine.FramebufferRequest = .{};
 
 inline fn done() noreturn {
     while (true) {
@@ -320,13 +321,15 @@ export fn _start() callconv(.C) void {
 
     try debug_print("New date: {}", .{date});
 
+    display(framebuffer_req);
+
     done();
 
     const exit = Port(u32).new(0xf4);
     exit.write(0x10);
 }
 
-fn display(framebuffer_request: limine.FramebufferResponse) void {
+fn display(framebuffer_request: limine.FramebufferRequest) void {
     if (framebuffer_request.response) |framebuffer_response| {
         const framebuffers = framebuffer_response.framebuffers();
         try debug_print("Found {} framebuffer(s)", .{framebuffers.len});
@@ -336,7 +339,6 @@ fn display(framebuffer_request: limine.FramebufferResponse) void {
                 try debug_print("Framebuffer (ID: {}), Resolution {}x{}", .{ idx, framebuffer.width, framebuffer.height });
             }
 
-            // Get the first framebuffer's information.
             const framebuffer = framebuffer_response.framebuffers()[0];
             try debug_print("Selected framebuffer ID:0\n", .{});
 
@@ -346,7 +348,6 @@ fn display(framebuffer_request: limine.FramebufferResponse) void {
                     const color: u32 = 0x01 * @as(u32, @intCast(x)) + 0x0001 * @as(u32, @intCast(y)) + 0x00001 * 255 + 0x000000FF;
                     @as(*u32, @ptrCast(@alignCast(framebuffer.address + pixel_offset))).* = color;
                 }
-                // Write 0xFFFFFFFF to the provided pixel offset to fill it white.
             }
         }
     }
