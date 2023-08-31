@@ -320,17 +320,6 @@ export fn _start() callconv(.C) void {
 
     try debug_print("New date: {}", .{date});
 
-    // Ensure we got a framebuffer.
-    var last_address = @as(u64, @intCast(0));
-    _ = last_address;
-
-    try debug_print("--------------", .{});
-    try debug_print("{?}", .{paging2(VirtAddr.new(offset))});
-    try debug_print("--------------", .{});
-
-    const testAlloc = alloc(10000) catch {};
-    try debug_print("Test alloc: {?}", .{testAlloc});
-
     done();
 
     const exit = Port(u32).new(0xf4);
