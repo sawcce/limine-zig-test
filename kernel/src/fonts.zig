@@ -1,6 +1,6 @@
 // Taken from: https://github.com/dhepper/font8x8/tree/master
 
-pub export var font8x8_basic: [128][8]u8 = [128][8]u8{
+pub export const font8x8_basic: [128][8]u8 = [128][8]u8{
     [8]u8{
         0,
         0,
