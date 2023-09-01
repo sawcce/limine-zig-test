@@ -34,10 +34,145 @@ inline fn done() noreturn {
 const serial_port = SerialPort.new(0x3F8);
 pub var offset: u64 = undefined;
 
+pub const Display = struct {
+    framebuffer: *limine.Framebuffer,
+
+    pub inline fn set_pixel(self: @This(), x_pos: u64, y_pos: u64, color: u32) void {
+        const pixel_offset = x_pos * 4 + y_pos * self.framebuffer.pitch;
+        @as(*align(4) u32, @ptrCast(@alignCast(self.framebuffer.address + pixel_offset))).* = color;
+    }
+
+    pub fn fill_blank(self: @This()) void {
+        for (0..self.framebuffer.height) |y_pos| {
+            for (0..self.framebuffer.width) |x_pos| {
+                self.set_pixel(x_pos, y_pos, 0x121212);
+            }
+        }
+    }
+
+    pub fn write(_self: @This(), message: []const u8) error{}!usize {
+        _ = _self;
+        write_message(message);
+
+        return message.len;
+    }
+
+    pub const Writer = std.io.Writer(@This(), error{}, write);
+
+    pub fn writer(self: @This()) Writer {
+        return .{ .context = self };
+    }
+};
+
+pub var current_display: ?Display = null;
+
+const bg_color: u32 = 0x121212;
+const text_color: u32 = 0xF05E48;
+
+var x: u64 = 10;
+var y: u64 = 10;
+
 pub fn debug_print(comptime fmt: []const u8, args: anytype) !void {
     _ = try serial_port.write_message("[KERNEL] ");
     try std.fmt.format(serial_port.writer(), fmt, args);
     _ = try serial_port.write_message("\n");
+
+    if (current_display) |dis| {
+        write_message("[KERNEL]");
+        try std.fmt.format(dis.writer(), fmt, args);
+        write_message("\n");
+    }
+}
+
+const fonts = @import("fonts.zig");
+const font = fonts.font8x8_basic;
+
+fn write_message(message: []const u8) void {
+    if (current_display) |d| {
+        const fb = d.framebuffer;
+
+        for (message) |char| {
+            // try debug_print("Char: {any}", .{font[char]});
+
+            if ((char == '\n') or (x > fb.width - 20)) {
+                x = 10;
+                y += 10;
+
+                if (y > fb.height - 10) {
+                    y = 140;
+                }
+
+                for (0..10) |yy| {
+                    for (0..fb.width) |xx| {
+                        const pixel_offset = (x + xx) * 4 + (y + yy) * fb.pitch;
+                        @as(*align(4) u32, @ptrCast(@alignCast(fb.address + pixel_offset))).* = bg_color;
+                    }
+                }
+
+                continue;
+            }
+
+            const bm = font[char];
+
+            for (bm, 0..) |line, y2| {
+                // var t: [8]u8 = undefined;
+
+                for (0..8) |z| {
+                    const pixel_offset = (x + z) * 4 + (y + y2) * fb.pitch;
+                    const is_set = std.math.shr(u8, line, z) & 1;
+                    // t[z] = is_set;
+
+                    const color: u32 = switch (is_set) {
+                        0 => @intCast(bg_color),
+                        1 => @intCast(text_color),
+                        else => @intCast(0xFF0000),
+                    };
+
+                    @as(*align(4) u32, @ptrCast(@alignCast(fb.address + pixel_offset))).* = color;
+                }
+            }
+
+            x += 10;
+        }
+    }
+}
+
+fn display(framebuffer_request: limine.FramebufferRequest) void {
+    if (framebuffer_request.response) |framebuffer_response| {
+        const framebuffers = framebuffer_response.framebuffers();
+        try debug_print("Found {} framebuffer(s)", .{framebuffers.len});
+
+        if (framebuffer_response.framebuffer_count >= 1) {
+            for (framebuffers, 0..) |fb, idx| {
+                try debug_print("Fb (ID: {}), Resolution {}x{}, BPP: {}", .{ idx, fb.width, fb.height, fb.bpp });
+            }
+
+            const d = Display{ .framebuffer = framebuffer_response.framebuffers()[0] };
+            d.fill_blank();
+
+            try debug_print("Selected framebuffer ID:0\n", .{});
+            current_display = d;
+
+            const message =
+                \\ $$\      $$\                                      $$$$$$\   $$$$$$\  $$\
+                \\ $$$\    $$$ |                                    $$  __$$\ $$  __$$\ $$ |
+                \\ $$$$\  $$$$ | $$$$$$\   $$$$$$\   $$$$$$\        $$ /  $$ |$$ /  \__|$$ |
+                \\ $$\$$\$$ $$ |$$  __$$\ $$  __$$\ $$  __$$\       $$ |  $$ |\$$$$$$\  $$ |
+                \\ $$ \$$$  $$ |$$$$$$$$ |$$$$$$$$ |$$ /  $$ |      $$ |  $$ | \____$$\ \__|
+                \\ $$ |\$  /$$ |$$   ____|$$   ____|$$ |  $$ |      $$ |  $$ |$$\   $$ |
+                \\ $$ | \_/ $$ |\$$$$$$$\ \$$$$$$$\ $$$$$$$  |       $$$$$$  |\$$$$$$  |$$\
+                \\ \__|     \__| \_______| \_______|$$  ____/        \______/  \______/ \__|
+                \\                                  $$ |
+                \\                                  $$ |
+                \\                                  \__|
+            ;
+
+            write_message(message);
+            x = 0;
+            y = 140;
+
+        }
+    }
 }
 
 fn getBits(number: u64, start: u64, end: u64) u64 {
@@ -191,6 +326,8 @@ export fn _start() callconv(.C) void {
         offset = hhdm_res.offset;
     }
 
+    display(framebuffer_req);
+
     if (memory_map_request.response) |memory_map_response| {
         const entries = memory_map_response.entries();
         mem.init(entries);
@@ -207,7 +344,7 @@ export fn _start() callconv(.C) void {
         try debug_print("{} entries, {} bytes", .{ memory_map_response.entry_count, total_size });
     }
 
-    asm volatile ("int $3");
+    // asm volatile ("int $3");
 
     const uefi = std.os.uefi;
     _ = uefi;
@@ -321,36 +458,10 @@ export fn _start() callconv(.C) void {
 
     try debug_print("New date: {}", .{date});
 
-    display(framebuffer_req);
-
     done();
 
     const exit = Port(u32).new(0xf4);
     exit.write(0x10);
-}
-
-fn display(framebuffer_request: limine.FramebufferRequest) void {
-    if (framebuffer_request.response) |framebuffer_response| {
-        const framebuffers = framebuffer_response.framebuffers();
-        try debug_print("Found {} framebuffer(s)", .{framebuffers.len});
-
-        if (framebuffer_response.framebuffer_count >= 1) {
-            for (framebuffers, 0..) |framebuffer, idx| {
-                try debug_print("Framebuffer (ID: {}), Resolution {}x{}", .{ idx, framebuffer.width, framebuffer.height });
-            }
-
-            const framebuffer = framebuffer_response.framebuffers()[0];
-            try debug_print("Selected framebuffer ID:0\n", .{});
-
-            for (0..100) |x| {
-                for (0..100) |y| {
-                    const pixel_offset = framebuffer.pitch * x + y * 4;
-                    const color: u32 = 0x01 * @as(u32, @intCast(x)) + 0x0001 * @as(u32, @intCast(y)) + 0x00001 * 255 + 0x000000FF;
-                    @as(*u32, @ptrCast(@alignCast(framebuffer.address + pixel_offset))).* = color;
-                }
-            }
-        }
-    }
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, e: ?usize) noreturn {
