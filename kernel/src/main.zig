@@ -7,6 +7,9 @@ const mem = @import("mem.zig");
 const img = @import("zigimg");
 const acpi = @import("acpi.zig");
 
+const pic_mod = @import("pic.zig");
+const PIC_STRUCT = pic_mod.PIC;
+
 const RTC = rtc_.RTC;
 const Date = rtc_.Date;
 
@@ -170,7 +173,6 @@ fn display(framebuffer_request: limine.FramebufferRequest) void {
             write_message(message);
             x = 0;
             y = 140;
-
         }
     }
 }
@@ -225,11 +227,22 @@ const ExperimentalAllocator = struct {
     }
 
     fn alloc_(ctx: *anyopaque, len: usize, ptr_align: u8, ret_address: usize) ?[*]u8 {
-        debug_print("Alloc: {*}, {}, {}, {}", .{ ctx, len, ptr_align, ret_address }) catch {};
-        return null;
+        _ = ret_address;
+        const aligned_len = std.mem.alignForward(usize, len, mem.page_size);
+        debug_print("Alloc: {}, {}, {}, aligned_len: {}", .{ ctx, len, ptr_align, aligned_len }) catch {};
+
+        const frame = mem.frame_alloc() catch {
+            return null;
+        };
+        const ptr: [*]u8 = @ptrCast(frame.ptr);
+
+        return ptr;
     }
 
-    fn free(_: *anyopaque, _: []u8, _: u8, _: usize) void {}
+    fn free(_: *anyopaque, slice: []u8, _: u8, _: usize) void {
+        try debug_print("Free: {any}", .{slice});
+        try mem.free_zone(slice.ptr, slice.len);
+    }
 
     fn resize(_: *anyopaque, _: []u8, _: u8, _: usize, _: usize) bool {
         return false;
@@ -312,14 +325,423 @@ fn alloc(size: usize) !?*anyopaque {
     return null;
 }
 
+fn testHandler(frame: *idt.Frame) void {
+    try debug_print("Interrupt: {}", .{frame.*});
+}
+
+fn trapHandler(frame: *idt.Frame) void {
+    try debug_print("Interrupt: {}", .{frame.*});
+
+    while (true) {
+        asm volatile ("hlt");
+    }
+}
+
+fn timerHandler(frame: *idt.Frame) void {
+    _ = frame;
+    // try debug_print("PIC: {}", .{frame});
+    pic_mod.GLOBAL_PIC.?.eoi(32);
+}
+
+const kbdEvent = packed struct {
+    key: u7,
+    press: bool,
+};
+
+const KeyCode = enum {
+    // ========= Row 1 (the F-keys) =========
+    /// Top Left of the Keyboard
+    Escape,
+    /// Function Key F1
+    F1,
+    /// Function Key F2
+    F2,
+    /// Function Key F3
+    F3,
+    /// Function Key F4
+    F4,
+    /// Function Key F5
+    F5,
+    /// Function Key F6
+    F6,
+    /// Function Key F7
+    F7,
+    /// Function Key F8
+    F8,
+    /// Function Key F9
+    F9,
+    /// Function Key F10
+    F10,
+    /// Function Key F11
+    F11,
+    /// Function Key F12
+    F12,
+
+    /// The Print Screen Key
+    PrintScreen,
+    /// The Sys Req key (you get this keycode with Alt + PrintScreen)
+    SysRq,
+    /// The Scroll Lock key
+    ScrollLock,
+    /// The Pause/Break key
+    PauseBreak,
+
+    // ========= Row 2 (the numbers) =========
+    /// Symbol key to the left of `Key1`
+    Oem8,
+    /// Number Line, Digit 1
+    Key1,
+    /// Number Line, Digit 2
+    Key2,
+    /// Number Line, Digit 3
+    Key3,
+    /// Number Line, Digit 4
+    Key4,
+    /// Number Line, Digit 5
+    Key5,
+    /// Number Line, Digit 6
+    Key6,
+    /// Number Line, Digit 7
+    Key7,
+    /// Number Line, Digit 8
+    Key8,
+    /// Number Line, Digit 9
+    Key9,
+    /// Number Line, Digit 0
+    Key0,
+    /// US Minus/Underscore Key (right of 'Key0')
+    OemMinus,
+    /// US Equals/Plus Key (right of 'OemMinus')
+    OemPlus,
+    /// Backspace
+    Backspace,
+
+    /// Top Left of the Extended Block
+    Insert,
+    /// Top Middle of the Extended Block
+    Home,
+    /// Top Right of the Extended Block
+    PageUp,
+
+    /// The Num Lock key
+    NumpadLock,
+    /// The Numpad Divide (or Slash) key
+    NumpadDivide,
+    /// The Numpad Multiple (or Star) key
+    NumpadMultiply,
+    /// The Numpad Subtract (or Minus) key
+    NumpadSubtract,
+
+    // ========= Row 3 (QWERTY) =========
+    /// The Tab Key
+    Tab,
+    /// Letters, Top Row #1
+    Q,
+    /// Letters, Top Row #2
+    W,
+    /// Letters, Top Row #3
+    E,
+    /// Letters, Top Row #4
+    R,
+    /// Letters, Top Row #5
+    T,
+    /// Letters, Top Row #6
+    Y,
+    /// Letters, Top Row #7
+    U,
+    /// Letters, Top Row #8
+    I,
+    /// Letters, Top Row #9
+    O,
+    /// Letters, Top Row #10
+    P,
+    /// US ANSI Left-Square-Bracket key
+    Oem4,
+    /// US ANSI Right-Square-Bracket key
+    Oem6,
+    /// US ANSI Backslash Key / UK ISO Backslash Key
+    Oem5,
+    /// The UK/ISO Hash/Tilde key (ISO layout only)
+    Oem7,
+
+    /// The Delete key - bottom Left of the Extended Block
+    Delete,
+    /// The End key - bottom Middle of the Extended Block
+    End,
+    /// The Page Down key - -bottom Right of the Extended Block
+    PageDown,
+
+    /// The Numpad 7/Home key
+    Numpad7,
+    /// The Numpad 8/Up Arrow key
+    Numpad8,
+    /// The Numpad 9/Page Up key
+    Numpad9,
+    /// The Numpad Add/Plus key
+    NumpadAdd,
+
+    // ========= Row 4 (ASDF) =========
+    /// Caps Lock
+    CapsLock,
+    /// Letters, Middle Row #1
+    A,
+    /// Letters, Middle Row #2
+    S,
+    /// Letters, Middle Row #3
+    D,
+    /// Letters, Middle Row #4
+    F,
+    /// Letters, Middle Row #5
+    G,
+    /// Letters, Middle Row #6
+    H,
+    /// Letters, Middle Row #7
+    J,
+    /// Letters, Middle Row #8
+    K,
+    /// Letters, Middle Row #9
+    L,
+    /// The US ANSI Semicolon/Colon key
+    Oem1,
+    /// The US ANSI Single-Quote/At key
+    Oem3,
+
+    /// The Return Key
+    Return,
+
+    /// The Numpad 4/Left Arrow key
+    Numpad4,
+    /// The Numpad 5 Key
+    Numpad5,
+    /// The Numpad 6/Right Arrow key
+    Numpad6,
+
+    // ========= Row 5 (ZXCV) =========
+    /// Left Shift
+    LShift,
+    /// Letters, Bottom Row #1
+    Z,
+    /// Letters, Bottom Row #2
+    X,
+    /// Letters, Bottom Row #3
+    C,
+    /// Letters, Bottom Row #4
+    V,
+    /// Letters, Bottom Row #5
+    B,
+    /// Letters, Bottom Row #6
+    N,
+    /// Letters, Bottom Row #7
+    M,
+    /// US ANSI `,<` key
+    OemComma,
+    /// US ANSI `.>` Key
+    OemPeriod,
+    /// US ANSI `/?` Key
+    Oem2,
+    /// Right Shift
+    RShift,
+
+    /// The up-arrow in the inverted-T
+    ArrowUp,
+
+    /// Numpad 1/End Key
+    Numpad1,
+    /// Numpad 2/Arrow Down Key
+    Numpad2,
+    /// Numpad 3/Page Down Key
+    Numpad3,
+    /// Numpad Enter
+    NumpadEnter,
+
+    // ========= Row 6 (modifers and space bar) =========
+    /// The left-hand Control key
+    LControl,
+    /// The left-hand 'Windows' key
+    LWin,
+    /// The left-hand Alt key
+    LAlt,
+    /// The Space Bar
+    Spacebar,
+    /// The right-hand AltGr key
+    RAltGr,
+    /// The right-hand Win key
+    RWin,
+    /// The 'Apps' key (aka 'Menu' or 'Right-Click')
+    Apps,
+    /// The right-hand Control key
+    RControl,
+
+    /// The left-arrow in the inverted-T
+    ArrowLeft,
+    /// The down-arrow in the inverted-T
+    ArrowDown,
+    /// The right-arrow in the inverted-T
+    ArrowRight,
+
+    /// The Numpad 0/Insert Key
+    Numpad0,
+    /// The Numppad Period/Delete Key
+    NumpadPeriod,
+
+    // ========= JIS 109-key extra keys =========
+    /// Extra JIS key (0x7B)
+    Oem9,
+    /// Extra JIS key (0x79)
+    Oem10,
+    /// Extra JIS key (0x70)
+    Oem11,
+    /// Extra JIS symbol key (0x73)
+    Oem12,
+    /// Extra JIS symbol key (0x7D)
+    Oem13,
+
+    // ========= Extra Keys =========
+    /// Multi-media keys - Previous Track
+    PrevTrack,
+    /// Multi-media keys - Next Track
+    NextTrack,
+    /// Multi-media keys - Volume Mute Toggle
+    Mute,
+    /// Multi-media keys - Open Calculator
+    Calculator,
+    /// Multi-media keys - Play
+    Play,
+    /// Multi-media keys - Stop
+    Stop,
+    /// Multi-media keys - Increase Volume
+    VolumeDown,
+    /// Multi-media keys - Decrease Volume
+    VolumeUp,
+    /// Multi-media keys - Open Browser
+    WWWHome,
+    /// Sent when the keyboard boots
+    PowerOnTestOk,
+    /// Sent by the keyboard when too many keys are pressed
+    TooManyKeys,
+    /// Used as a 'hidden' Right Control Key (Pause = RControl2 + Num Lock)
+    RControl2,
+    /// Used as a 'hidden' Right Alt Key (Print Screen = RAlt2 + PrntScr)
+    RAlt2,
+};
+
+fn keyboardHandler(_: *idt.Frame) void {
+    try debug_print("KBD", .{});
+    const port = Port(u8).new(0x60);
+    const scancode: *const kbdEvent = @ptrCast(&port.read());
+    try debug_print("Scancode: {}, {}", .{scancode, mapKey(@intCast(scancode.key))});
+
+    pic_mod.GLOBAL_PIC.?.eoi(33);
+}
+
+fn mapKey(key: u8) KeyCode {
+    return switch (key) {
+        0x01 => KeyCode.Escape,
+        0x02 => KeyCode.Key1,
+        0x03 => KeyCode.Key2,
+        0x04 => KeyCode.Key3,
+        0x05 => KeyCode.Key4,
+        0x06 => KeyCode.Key5,
+        0x07 => KeyCode.Key6,
+        0x08 => KeyCode.Key7,
+        0x09 => KeyCode.Key8,
+        0x0A => KeyCode.Key9,
+        0x0B => KeyCode.Key0,
+        0x0C => KeyCode.OemMinus,
+        0x0D => KeyCode.OemPlus,
+        0x0E => KeyCode.Backspace,
+        0x0F => KeyCode.Tab,
+        0x10 => KeyCode.Q,
+        0x11 => KeyCode.W,
+        0x12 => KeyCode.E,
+        0x13 => KeyCode.R,
+        0x14 => KeyCode.T,
+        0x15 => KeyCode.Y,
+        0x16 => KeyCode.U,
+        0x17 => KeyCode.I,
+        0x18 => KeyCode.O,
+        0x19 => KeyCode.P,
+        0x1A => KeyCode.Oem4,
+        0x1B => KeyCode.Oem6,
+        0x1C => KeyCode.Return,
+        0x1D => KeyCode.LControl,
+        0x1E => KeyCode.A,
+        0x1F => KeyCode.S,
+        0x20 => KeyCode.D,
+        0x21 => KeyCode.F,
+        0x22 => KeyCode.G,
+        0x23 => KeyCode.H,
+        0x24 => KeyCode.J,
+        0x25 => KeyCode.K,
+        0x26 => KeyCode.L,
+        0x27 => KeyCode.Oem1,
+        0x28 => KeyCode.Oem3,
+        0x29 => KeyCode.Oem8,
+        0x2A => KeyCode.LShift,
+        0x2B => KeyCode.Oem7,
+        0x2C => KeyCode.Z,
+        0x2D => KeyCode.X,
+        0x2E => KeyCode.C,
+        0x2F => KeyCode.V,
+        0x30 => KeyCode.B,
+        0x31 => KeyCode.N,
+        0x32 => KeyCode.M,
+        0x33 => KeyCode.OemComma,
+        0x34 => KeyCode.OemPeriod,
+        0x35 => KeyCode.Oem2,
+        0x36 => KeyCode.RShift,
+        0x37 => KeyCode.NumpadMultiply,
+        0x38 => KeyCode.LAlt,
+        0x39 => KeyCode.Spacebar,
+        0x3A => KeyCode.CapsLock,
+        0x3B => KeyCode.F1,
+        0x3C => KeyCode.F2,
+        0x3D => KeyCode.F3,
+        0x3E => KeyCode.F4,
+        0x3F => KeyCode.F5,
+        0x40 => KeyCode.F6,
+        0x41 => KeyCode.F7,
+        0x42 => KeyCode.F8,
+        0x43 => KeyCode.F9,
+        0x44 => KeyCode.F10,
+        0x45 => KeyCode.NumpadLock,
+        0x46 => KeyCode.ScrollLock,
+        0x47 => KeyCode.Numpad7,
+        0x48 => KeyCode.Numpad8,
+        0x49 => KeyCode.Numpad9,
+        0x4A => KeyCode.NumpadSubtract,
+        0x4B => KeyCode.Numpad4,
+        0x4C => KeyCode.Numpad5,
+        0x4D => KeyCode.Numpad6,
+        0x4E => KeyCode.NumpadAdd,
+        0x4F => KeyCode.Numpad1,
+        0x50 => KeyCode.Numpad2,
+        0x51 => KeyCode.Numpad3,
+        0x52 => KeyCode.Numpad0,
+        0x53 => KeyCode.NumpadPeriod,
+        0x54 => KeyCode.SysRq,
+        0x56 => KeyCode.Oem5,
+        0x57 => KeyCode.F11,
+        0x58 => KeyCode.F12,
+        else => KeyCode.A,
+    };
+}
+
 // The following will be our kernel's entry point.
 export fn _start() callconv(.C) void {
     serial_port.init();
 
-    idt.add_interrupt(3);
-    idt.add_interrupt(13);
+    idt.add_interrupt(3, testHandler);
+    idt.add_interrupt(13, trapHandler);
+
+    idt.add_interrupt(32, timerHandler);
+    idt.add_interrupt(33, keyboardHandler);
 
     idt.load();
+
+    const pic = PIC_STRUCT.new();
+    _ = pic;
+    PIC_STRUCT.enable();
 
     if (hhdm_req.response) |hhdm_res| {
         try debug_print("Offset: {x}", .{hhdm_res.offset});
@@ -458,8 +880,25 @@ export fn _start() callconv(.C) void {
 
     try debug_print("New date: {}", .{date});
 
-    done();
+    // const allocator = ExperimentalAllocator;
+    // const a = allocator.allocator() catch {
+    //     panic("Couldn't init", null, null);
+    // };
 
+    // var b = a.alloc(*const []u8, 3) catch {panic("Couldn't alloc", null, null);};
+    // b[0] = @alignCast(@ptrCast("Hello, world"));
+    // // b[1] = "Test";
+    // // b[2] = "Test 2";
+
+    // for(b) |item| {
+    //     try debug_print("Test: {s}", .{item.*});
+    // }
+
+    // a.free(b);
+
+    try debug_print("Test!", .{});
+
+    done();
     const exit = Port(u32).new(0xf4);
     exit.write(0x10);
 }

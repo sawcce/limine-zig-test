@@ -37,6 +37,11 @@ pub fn init(entries: []*limine.MemoryMapEntry) void {
     // next_page = first_entry.next.?;
 }
 
+pub const PageFrame = extern struct {
+    ptr: *anyopaque,
+    statuses: [512]u8 = undefined,
+};
+
 // Allocates a new 4kib page
 pub fn allocate_new() !*anyopaque {
     if (next_page) |page| {
@@ -51,12 +56,40 @@ pub fn allocate_new() !*anyopaque {
     return error.NoMorePhysicalMemory;
 }
 
+/// EXPERIMENT: TO BE REWORKED
+pub fn frame_alloc() !*PageFrame {
+    const frame = try allocate_new();
+    const page = try allocate_new();
+
+    const frame_ptr: *PageFrame = @alignCast(@ptrCast(frame));
+    frame_ptr.ptr = page;
+    frame_ptr.statuses = undefined;
+
+    for (0..frame_ptr.statuses.len) |i| {
+        frame_ptr.statuses[i] = 0;
+    }
+
+    return frame_ptr;
+}
+
+pub fn free_zone(start: *anyopaque, len: usize) !void {
+    const startPos: u64 = @intFromPtr(start);
+    const page = startPos - @mod(startPos, page_size);
+    const index = (startPos - page) / 8;
+
+    for(index..index+len) |i| {
+        try debug_print("i: {}", .{i});
+    }
+
+    try debug_print("Start Position: {}, page: {}, index: {}, len: {}", .{startPos, page, index, len});
+}
+
 pub fn allocate(size: usize) !*anyopaque {
     _ = size;
 }
 
 pub fn free(page: *anyopaque) void {
-    const new = @as(*align (8) PageAllocatorEntry, @ptrCast(@alignCast(page)));
+    const new = @as(*align(8) PageAllocatorEntry, @ptrCast(@alignCast(page)));
     new.next = next_page;
     next_page = new;
 
