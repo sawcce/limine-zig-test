@@ -5,6 +5,7 @@ const handlers_amount = 256;
 pub var idt = [1]InterruptDescriptor{undefined} ** handlers_amount;
 
 const Trampoline = fn () callconv(.Naked) void;
+const Handler = fn(*Frame) void;
 
 fn generate_trampolines() [handlers_amount]*const Trampoline {
     var result: [handlers_amount]*const Trampoline = undefined;
@@ -17,6 +18,7 @@ fn generate_trampolines() [handlers_amount]*const Trampoline {
 }
 
 var trampolines: [handlers_amount]*const Trampoline = generate_trampolines();
+var handlers: [handlers_amount]*const Handler = undefined;
 
 pub fn make_trampoline(comptime interruptIdx: u8) *const Trampoline {
     return struct {
@@ -41,7 +43,7 @@ export fn catcher() callconv(.Naked) void {
     // unreachable;
 }
 
-const Frame = extern struct {
+pub const Frame = extern struct {
     idx: u64,
     ec: u64,
 
@@ -58,11 +60,7 @@ const Frame = extern struct {
 };
 
 export fn handler_fn(frame: *Frame) void {
-    try debug_print("Interrupt: {}\n", .{frame});
-
-    while (frame.idx != 3) {
-        asm volatile ("hlt");
-    }
+    handlers[frame.idx](frame);
 }
 
 pub fn load() void {
@@ -77,8 +75,9 @@ pub fn load() void {
     );
 }
 
-pub fn add_interrupt(idx: u8) void {
+pub fn add_interrupt(idx: u8, handler: *const Handler) void {
     const pointer = @intFromPtr(trampolines[idx]);
+    handlers[idx] = handler;
     // var pointer = @intCast(usize, 4567);
 
     try debug_print("Interrupt: {}", .{idx});
@@ -128,3 +127,33 @@ pub const IDTR = packed struct {
     limit: u16,
     base: u64,
 };
+
+fn name(intnum: u64) []const u8 {
+    return switch (intnum) {
+        0x00 => "Divide by zero",
+        0x01 => "Debug",
+        0x02 => "Non-maskable interrupt",
+        0x03 => "Breakpoint",
+        0x04 => "Overflow",
+        0x05 => "Bound range exceeded",
+        0x06 => "Invalid opcode",
+        0x07 => "Device not available",
+        0x08 => "Double fault",
+        0x09 => "Coprocessor Segment Overrun",
+        0x0A => "Invalid TSS",
+        0x0B => "Segment Not Present",
+        0x0C => "Stack-Segment Fault",
+        0x0D => "General Protection Fault",
+        0x0E => "Page Fault",
+        0x0F => unreachable,
+        0x10 => "x87 Floating-Point Exception",
+        0x11 => "Alignment Check",
+        0x12 => "Machine Check",
+        0x13 => "SIMD Floating-Point Exception",
+        0x14 => "Virtualization Exception",
+        0x15...0x1D => unreachable,
+        0x1E => "Security Exception",
+
+        else => unreachable,
+    };
+}
